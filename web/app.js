@@ -149,7 +149,8 @@ function brDist(id, br) {
 function autoFocus(S) {
   if (S.game !== "battle") return null;
   if (S.me && S.me.alive === false) {
-    return S.killer && S.killer.id ? { id: S.killer.id, player: S.killer, src: "killer" } : null;
+    // deadFor vazio: ainda não nasceu nesta partida (não caiu)
+    return S.me.deadFor != null && S.killer && S.killer.id ? { id: S.killer.id, player: S.killer, src: "killer" } : null;
   }
   const t = S.target;
   if (t) {
@@ -289,12 +290,13 @@ function targetGeo(t) {
 
 function renderEmpty(S, me) {
   const ingame = S.game === "battle";
-  const dead = ingame && S.me && S.me.alive === false;
+  const out = ingame && S.me && S.me.alive === false;
+  const dead = out && S.me.deadFor != null;
   const mine = me ? `<div class="mine-card">${photo(me.id, me.cls, "small")}<div><b>Seu avião: ${esc(nameOf(me))}</b><p class="hint">${esc(quickSelf(me))}</p></div></div>` : "";
-  if (dead) {
-    setHtml("#fHead", `<span class="src">☠ Você caiu</span>`);
-    setHtml("#fHero", `<div class="empty"><h1>Você caiu</h1>
-      <p>Escolha o próximo avião. O painel volta a procurar alvos quando você estiver no ar.</p></div>`);
+  if (out) {
+    setHtml("#fHead", `<span class="src">${dead ? "☠ Você caiu" : "Aguardando você nascer"}</span>`);
+    setHtml("#fHero", `<div class="empty"><h1>${dead ? "Você caiu" : "Escolha o seu avião"}</h1>
+      <p>${dead ? "Escolha o próximo avião. " : ""}O painel começa a procurar alvos quando você estiver no ar.</p></div>`);
     setHtml("#fTactic", "");
     setHtml("#fTiles", "");
     $("#fDetails").hidden = true;
@@ -308,6 +310,7 @@ function renderEmpty(S, me) {
       <li><b>Atire nele</b>: quando o kill feed disser que você acertou, o painel liga o nome ao avião que estava na frente do seu nariz.</li>
       <li>Ele te acertou? Quem estava apontando para você é reconhecido do mesmo jeito.</li>
       <li>O painel também aprende sozinho com as brigas dos aliados e com o rádio deles: quem é marcado pisca no mapa.</li>
+      <li>Quer o modelo antes de atirar? Ligue o rádio rápido <b>"Attack [alvo]!"</b> a uma tecla (passo a passo no README) e aperte <b>uma vez</b> com o alvo travado. Não repita em sequência: o chat bloqueia por spam.</li>
       <li>Se alguém te derrubar, aparece quem foi e como vencer aquele avião.</li>
       <li>Ou busque qualquer avião em <b>Comparar com…</b></li>
     </ol>
@@ -382,7 +385,7 @@ function renderUnknown(f, me, t) {
     <div class="ident">
       <h1>${esc(CLS[cls] || "Inimigo")} inimigo</h1>
       <div class="ov warn"><span class="ico">?</span>MODELO AINDA DESCONHECIDO</div>
-      <p class="pilot">Acerte uns tiros nele: quando o kill feed disser que você acertou, o painel liga o nome a este avião.</p>
+      <p class="pilot">Acerte uns tiros nele: quando o kill feed disser que você acertou, o painel liga o nome a este avião. Com pressa? Aperte sua tecla de rádio rápido (<b>"Attack…"</b>) uma vez.</p>
     </div>`);
   setHtml("#fTactic", cands.length ? `<div class="tactic"><div class="tname">Pode ser um destes</div><div class="tline">Inimigos dessa classe vistos no kill feed (quem trocou tiros com você vem primeiro). Clique para comparar.</div>
     <div class="cands">${cands.map((c) => {

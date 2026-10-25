@@ -248,6 +248,8 @@ def parse_feed(msg):
     return {"a": a_name, "av": a_veh, "verb": verb, "b": b_name, "bv": msg[s1 + 1:e1].strip()}
 
 
+# mensagens de rádio que fazem o ícone de quem mandou piscar no mapa (texto digitado não faz)
+SENDER_BLINK = re.compile(r"^(?:attention to the (?:map|designated grid)|thanks!|requesting a target)", re.I)
 CALL_VERB = re.compile(r"^(?:someone,\s*)?(?:i'm\s+attacking|attack|eliminate|destroy)\s+", re.I)
 CHAT_ALT = re.compile(r"([\d][\d.,\s]*)\s*m\s*\]")
 
@@ -387,6 +389,8 @@ class Match:
         self.fire_t = None     # última vez que o gatilho estava apertado
         self.trigger = False   # o avião mostra o gatilho (weapon1) no /indicators
         self.flash = None      # "você derrubou X", aparece por alguns segundos
+        self.me_last = None    # sua última posição no mapa (x, y, hora)
+        self.obs, self.obs_t = set(), None  # (atirador, vítima) já usados nesta leitura
 
     # -- jogadores
     def find_key(self, name):
@@ -425,19 +429,28 @@ class Match:
                 p["vehicles"].append(vehicle)
             p["id"] = self.db.lookup(vehicle, self.db.br(self.my_id), cls)[0] or p["id"]
 
+    def icon_of(self, key):
+        """Ícone do mapa do avião atual do jogador; None se o nome serve para mais de uma classe
+        (o "Me 410 A" é caça numa versão e ataque em outra)."""
+        p = self.players.get(key)
+        if not p or not p["vehicle"]:
+            return None
+        cl = {self.db.cls(i) for i in self.db.lookup(p["vehicle"])[1]}
+        return CLASS_ICON.get(cl.pop()) if len(cl) == 1 else None
+
     def my_key(self):
         return nick_key(self.nick) if self.nick else self.guess_nick()
 
     def guess_nick(self):
-        best, score = None, 0
+        """Sem nick configurado: quem aparece no kill feed com o seu avião em pelo menos dois aviões seus."""
         counts = {}
         for keys in self.my_vehicles.values():
             for k in keys:
                 counts[k] = counts.get(k, 0) + 1
-        for k, c in counts.items():
-            if c > score:
-                best, score = k, c
-        return best if score >= 1 else None
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        if not ranked or ranked[0][1] < 2 or (len(ranked) > 1 and ranked[1][1] == ranked[0][1]):
+            return None
+        return ranked[0][0]
 
     def sides(self):
         """Pinta os jogadores em dois times a partir de quem atirou em quem."""
@@ -469,6 +482,9 @@ class Match:
             if p["key"] == me and killer:
                 self.killer = {"key": killer["key"], "t": now}  # bateu e depois veio o crédito
             return False
+        tr = self.track_of(p["key"])
+        if tr:
+            tr["wreck"] = now  # a trava fica uns segundos no avião caindo: não é mais alvo
         p["dead"], p["dead_at"], p["death_vehicle"] = True, now, p["vehicle"]
         p["deaths"] += 1
         if killer:
@@ -489,6 +505,11 @@ class Match:
         if not info:
             return
         me = self.my_key()
+        if info.get("a") is None:  # derrubado pela antiaérea
+            b = self.player(info["b"], info["bv"], now, active=True)
+            if b and self.kill(b, None, now, fresh) and b["key"] == me:
+                self.add_log(now, "A antiaérea te derrubou", "bad")
+            return
         if "b" not in info:
             text = info.get("text", "")
             gone = text.startswith(("has crashed", "has been wrecked", "has disconnected"))
@@ -505,11 +526,21 @@ class Match:
         verb = info["verb"].lower()
         if "assist" in verb:
             return
-        # crédito de abate pode chegar depois que o atirador já caiu: não prova que ele está voando
-        a = self.player(info["a"], info["av"], now, active=verb in DAMAGE_VERBS)
+        # crédito de abate pode chegar depois que o atirador já caiu, e o fogo de um tiro antigo continua
+        # dando dano: nenhum dos dois prova que ele está voando
+        pa = self.players.get(self.find_key(info["a"]))
+        post = (verb in DAMAGE_VERBS and pa is not None and pa["dead"] and info["av"] == pa["death_vehicle"]
+                and now - pa["dead_at"] < 60)
+        a = self.player(info["a"], info["av"], now, active=verb in DAMAGE_VERBS and not post)
         b = self.player(info["b"], info["bv"], now, active=True)
         if not a or not b or a["key"] == b["key"]:
             return
+        # um tiro rende duas ou três linhas na mesma leitura: a posição só conta uma vez
+        if now != self.obs_t:
+            self.obs, self.obs_t = set(), now
+        seen = (a["key"], b["key"]) in self.obs
+        self.obs.add((a["key"], b["key"]))
+        geo = fresh and verb in DAMAGE_VERBS and not post and not seen
         self.learn_nick(a, info["av"])
         self.edges.append((a["key"], b["key"], False))
         self.side = self.sides()
@@ -519,20 +550,23 @@ class Match:
             self.last_hit[(a["key"], b["key"])] = now
         if me and a["key"] == me:
             self.engaged.append({"key": b["key"], "t": now, "dir": "out", "verb": verb})
-            if fresh and verb in DAMAGE_VERBS:
+            if geo:
                 self.ev_my_hit(b, now)
             if killed:
                 self.add_log(now, f"Você derrubou {bv} ({b['nick']})", "good")
                 self.flash = {"key": b["key"], "t": now}
+                tg = self.target
+                if tg and not tg["label"] and self.icon_of(b["key"]) in (None, tg["icon"]):
+                    tg["wreck"] = now  # você derrubou o que estava travado
         elif me and b["key"] == me:
             self.engaged.append({"key": a["key"], "t": now, "dir": "in", "verb": verb})
-            if fresh and verb in DAMAGE_VERBS:
+            if geo:
                 self.ev_hit_me(a, now)
             if killed:
                 self.add_log(now, f"{av} ({a['nick']}) te derrubou", "bad")
             elif verb in DAMAGE_VERBS:
                 self.add_log(now, f"{av} ({a['nick']}) {VERB_PT.get(verb, 'te acertou')}", "warn")
-        elif fresh and verb in DAMAGE_VERBS:
+        elif geo:
             self.ev_fight(a, b, now)
         self.engaged = self.engaged[-40:]
 
@@ -555,10 +589,11 @@ class Match:
                 self.edges.append((s["key"], me, False))
             elif mode in ("team", "squad"):
                 self.edges.append((s["key"], me, True))
-                if fresh:
-                    # quem fala no rádio do time pisca no mapa por uns segundos: é assim que o aliado ganha nome
+                text = re.sub(r"<color=[^>]*>.*?</color>|</?color[^>]*>", "", ZW.sub("", m.get("msg") or "")).strip()
+                if fresh and SENDER_BLINK.match(text):
+                    # quem manda essas mensagens de rádio pisca no mapa: é assim que o aliado ganha nome
                     self.call_wait.append({"key": s["key"], "t": now, "side": "ally", "mine": False,
-                                           "icon": CLASS_ICON.get(self.db.cls(s["id"]))})
+                                           "icon": self.icon_of(s["key"])})
         call = parse_chat_call(m.get("msg") or "")
         if not call or not s or m.get("enemy"):
             return
@@ -576,7 +611,7 @@ class Match:
         if fresh:
             # quem é marcado pelo rádio pisca no mapa: é assim que o nome chega no avião certo
             self.call_wait.append({"key": t["key"], "t": now, "side": "enemy", "mine": s["key"] == me,
-                                   "icon": CLASS_ICON.get(self.db.cls(t["id"]))})
+                                   "icon": self.icon_of(t["key"])})
         if me and s["key"] == me:
             self.add_log(now, f"Você marcou {strip_glyphs(call['veh'])} ({t['nick']})", "info")
 
@@ -618,6 +653,7 @@ class Match:
         self.alive = False
         self.me_obj = None
         self.target = None
+        self.flash = None
 
     # -- rastros no mapa
     # O mapa não diz quem é quem. Cada avião vira um "rastro" que seguimos leitura a leitura, e o
@@ -716,7 +752,15 @@ class Match:
             # mapa vazio: partida carregando ou acabando, não quer dizer que você caiu
             self.me_obj = self.target = None
             return []
-        me_obj = next((o for o in objs if o.get("icon") == "Player" and color_side(o) == "player"), None)
+        icons = [o for o in objs if o.get("icon") == "Player"]
+        me_obj = next((o for o in icons if color_side(o) == "player"), None)
+        if me_obj is None and self.alive and self.me_last:
+            # o seu ícone também pisca (em azul) às vezes: vale se continuar no mesmo caminho
+            lx, ly, lt = self.me_last
+            me_obj = next((o for o in icons if o.get("blink")
+                           and math.hypot((o["x"] - lx) * W, (o["y"] - ly) * H) < 300 + 350 * (now - lt)), None)
+        if me_obj:
+            self.me_last = (me_obj["x"], me_obj["y"], now)
         self.update_me(me_obj, now)
         if firing and self.alive:
             self.fire_t = now
@@ -737,8 +781,8 @@ class Match:
                 # o inimigo está apontando para você?
                 e["towardMe"] = angle_between(e["dx"], e["dy"], -vx, -vy) < 35
             enemies.append(e)
-            if item["track"]["locked"] and me:
-                target = e  # o jogo mantém a trava uns segundos depois que você cai: só vale vivo
+            if item["track"]["locked"] and me and now - item["track"].get("wreck", -1e9) >= 6:
+                target = e  # a trava fica uns segundos depois que você cai ou que ele cai: só vale com os dois no ar
         enemies.sort(key=lambda e: e.get("dist", 0))
 
         if target:
@@ -791,15 +835,15 @@ class Match:
     def vote(self, tr, key, w, how, now):
         if not tr or not key or tr["dead"]:
             return
-        v = tr["votes"].setdefault(key, {"w": 0.0, "how": how, "best": 0.0, "t": now})
+        v = tr["votes"].setdefault(key, {"w": 0.0, "how": how, "best": 0.0, "t": now, "how_t": now})
         v["w"] = min(v["w"] + w, 10.0)
         if w >= v["best"]:
-            v["best"], v["how"] = w, how
+            v["best"], v["how"], v["how_t"] = w, how, now
         v["t"] = now
 
     def fits(self, key, side_name, icon=None):
         """Filtro de rastros do mesmo lado e da mesma classe do avião do jogador."""
-        cls_icon = icon or CLASS_ICON.get(self.db.cls((self.players.get(key) or {}).get("id")))
+        cls_icon = icon or self.icon_of(key)
         return lambda tr: tr is not None and tr["side"] == side_name and (not cls_icon or tr["icon"] == cls_icon)
 
     def ev_my_hit(self, b, now):
@@ -856,11 +900,12 @@ class Match:
             if now - k["t"] < 2.5:
                 keep.append(k)
                 continue
-            # quem continua voando não pode ser ele
-            for tr in self.live():
-                tr["votes"].pop(k["key"], None)
+            # quem continua voando (ou pode voltar ao mapa) não pode ser ele
+            for tr in self.tracks:
+                if not tr["dead"]:
+                    tr["votes"].pop(k["key"], None)
             sk = self.side.get(k["key"])
-            icon = CLASS_ICON.get(self.db.cls((self.players.get(k["key"]) or {}).get("id")))
+            icon = self.icon_of(k["key"])
             gone = [tr for tr in self.tracks
                     if tr["lost"] is not None and not tr["dead"] and tr["born"] < k["t"]
                     and k["t"] - 1.5 <= tr["lost"] <= k["t"] + 2.5
@@ -883,17 +928,26 @@ class Match:
         self.pending = keep
 
     def resolve_calls(self, now):
-        keep = []
+        """Liga cada mensagem de rádio ao avião que começou a piscar junto com ela."""
+        waits = []
         for c in self.call_wait:
-            cands = [tr for tr in self.live() if tr["side"] == c["side"] and tr["blink_t"] is not None
-                     and not tr.get("blink_used") and abs(tr["blink_t"] - c["t"]) <= 1.5
-                     and (not c["icon"] or tr["icon"] == c["icon"])]
-            if len(cands) == 1:
-                cands[0]["blink_used"] = True
-                self.vote(cands[0], c["key"], W_CALL, "call", now)
+            cur = self.track_of(c["key"])
+            if cur and cur["blink"] and cur["blink_t"] is not None and cur["blink_t"] < c["t"] - 1.5:
+                continue  # marcou de novo quem ainda está piscando da marcação anterior
+            c["cands"] = [tr for tr in self.live() if tr["side"] == c["side"] and tr["blink_t"] is not None
+                          and not tr.get("blink_used") and abs(tr["blink_t"] - c["t"]) <= 1.5
+                          and (not c["icon"] or tr["icon"] == c["icon"])]
+            waits.append(c)
+        keep = []
+        for c in waits:
+            # duas mensagens ao mesmo tempo disputando o mesmo avião piscando: nenhuma leva
+            rival = any(w is not c and {id(tr) for tr in w["cands"]} & {id(tr) for tr in c["cands"]} for w in waits)
+            if len(c["cands"]) == 1 and not rival:
+                c["cands"][0]["blink_used"] = True
+                self.vote(c["cands"][0], c["key"], W_CALL, "call", now)
             elif now - c["t"] <= 1.5:
                 keep.append(c)
-            elif c["mine"] and not cands and self.target and (not c["icon"] or self.target["icon"] == c["icon"]):
+            elif c["mine"] and not c["cands"] and self.target and (not c["icon"] or self.target["icon"] == c["icon"]):
                 self.vote(self.target, c["key"], W_CALL, "call", now)  # sua marcação vale para o seu alvo
         self.call_wait = keep
 
@@ -908,8 +962,8 @@ class Match:
                 p = self.players.get(key)
                 if not p or p["dead"] or p["left"] or key == me:
                     continue
-                c = self.db.cls(p["id"])
-                if c and CLASS_ICON.get(c) != tr["icon"]:
+                icon = self.icon_of(key)
+                if icon and icon != tr["icon"]:
                     continue
                 sk = self.side.get(key)
                 if sk is not None and SIDE_NAME[sk] != tr["side"]:
@@ -924,7 +978,7 @@ class Match:
                 continue
             used_t.add(tr["id"])
             used_k.add(key)
-            tr["label"] = {"key": key, "how": v["how"], "t": t, "w": w}
+            tr["label"] = {"key": key, "how": v["how"], "t": t, "how_t": v["how_t"], "w": w}
 
     def settle(self, now):
         """Depois de ler o mapa e as mensagens: fecha as pistas pendentes e distribui os nomes."""
@@ -945,14 +999,14 @@ class Match:
         key, how, sure, age = None, None, False, None
         lab = tr["label"]
         if lab:
-            key, how, age = lab["key"], lab["how"], round(now - lab["t"])
+            key, how, age = lab["key"], lab["how"], round(now - lab["how_t"])
             sure = lab["w"] >= W_SURE
         # sem nome: os inimigos daquela classe que o kill feed já mostrou e que não estão em outro
         # avião do mapa. Não vira palpite: o kill feed só mostra parte do time inimigo.
         named = {t["label"]["key"] for t in self.live() if t["label"] and t is not tr}
         cands = [k for k, p in self.players.items()
                  if self.side.get(k) == 1 and not p["dead"] and not p["left"] and p["id"]
-                 and self.db.cls(p["id"]) == cls and k not in named and k != key]
+                 and self.icon_of(k) in (None, tr["icon"]) and k not in named and k != key]
         # quem trocou tiros com você nesta vida vem primeiro na lista de "pode ser"
         recent = {e["key"]: e["t"] for e in self.engaged}
         cands.sort(key=lambda k: (-recent.get(k, 0), -self.players[k]["seen"]))
@@ -1072,7 +1126,8 @@ class Poller(threading.Thread):
                 self.map_gen = gen
         in_battle = bool(self.map_info and self.map_info.get("valid"))
         if not in_battle:
-            self.not_battle_since = self.not_battle_since or now
+            # abriu no hangar: a primeira batalha é sempre partida nova (o buffer é da anterior)
+            self.not_battle_since = self.not_battle_since or (now - 10 if self.map_gen is None else now)
         elif self.not_battle_since and now - self.not_battle_since > 10:
             self.new_match()
         if in_battle:
@@ -1136,21 +1191,21 @@ class Poller(threading.Thread):
         if self.backlog:
             # na primeira leitura vem o buffer inteiro: fica só a partida atual, com a hora de cada uma
             dmg, chat = current_match(dmg), current_match(chat)
-            for msgs in (dmg, chat):
-                newest = max([m.get("time") or 0 for m in msgs] or [0])
-                for m in msgs:
-                    m["_t"] = now - (newest - (m.get("time") or newest))
-            for m in dmg:
-                self.match.on_feed(m.get("msg", ""), m["_t"], fresh=False)
-            for m in chat:
-                self.match.on_chat(m, m["_t"], fresh=False)
+            # kill feed e chat usam o mesmo relógio da partida: uma âncora só, tudo em ordem de hora
+            newest = max([m.get("time") or 0 for m in dmg + chat] or [0])
+            msgs = [(m.get("time") or newest, 0, m) for m in dmg] + [(m.get("time") or newest, 1, m) for m in chat]
+            for mt, kind, m in sorted(msgs, key=lambda x: (x[0], x[1])):
+                if kind == 0:
+                    self.match.on_feed(m.get("msg", ""), now - (newest - mt), fresh=False)
+                else:
+                    self.match.on_chat(m, now - (newest - mt), fresh=False)
             self.mission_t = max([m.get("time") or 0 for m in dmg] or [0])
             self.backlog = False
             return
         for m in dmg:
             mt = m.get("time")
             if mt is not None:
-                if mt < self.mission_t - 30:
+                if mt < self.mission_t - 10:
                     self.new_match()  # o relógio da partida voltou: é outra partida
                 self.mission_t = max(self.mission_t, mt)
             self.match.on_feed(m.get("msg", ""), now)
@@ -1180,7 +1235,7 @@ class Poller(threading.Thread):
         if in_battle and not m.alive and m.killer and m.dead_at and m.killer["t"] >= m.dead_at - 2 \
                 and m.killer["key"] in m.players:
             killer = dict(m.public(m.killer["key"]), age=round(now - m.killer["t"]))
-        if in_battle and m.flash and now - m.flash["t"] < 6 and m.flash["key"] in m.players:
+        if in_battle and m.alive and m.flash and now - m.flash["t"] < 6 and m.flash["key"] in m.players:
             flash = dict(m.public(m.flash["key"]), age=round(now - m.flash["t"]))
         counts = {}
         for e in enemies:

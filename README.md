@@ -22,7 +22,7 @@ mapa e, quando o kill feed fala de alguém, olha quem estava na posição certa 
 | Você **atira e acerta** ("Tdlreis set afire X") | O nome vai para o inimigo que estava na frente do seu nariz, ao alcance das armas, enquanto o gatilho estava apertado. Aparece como **certo** |
 | Alguém te acerta | O nome vai para o inimigo daquela classe que estava apontando para você |
 | Um aliado troca tiros com um inimigo, ou derruba/é derrubado | O app reconhece pela posição dos dois e guarda o nome; quando você trava esse inimigo depois, ele já aparece (como **provável**) |
-| Um aliado marca um inimigo no rádio ("Attack X!") | O inimigo marcado pisca no mapa do jogo: o nome vai para ele, sem você apertar nada |
+| Um aliado (ou você, com a tecla de rádio abaixo) marca um inimigo no rádio ("Attack X!") | O inimigo marcado pisca no mapa do jogo e o nome vai para ele na hora |
 | Alguém te derruba | Enquanto você espera o respawn: quem foi e como vencer aquele avião |
 | Você derruba alguém | Um aviso rápido "Você derrubou X" e o painel limpa e vai para o próximo alvo |
 | Você clica num inimigo da lista ou busca um avião | A comparação que você quiser (volta ao automático sozinho quando você cai ou nasce de novo) |
@@ -30,9 +30,20 @@ mapa e, quando o kill feed fala de alguém, olha quem estava na posição certa 
 Quando não há pista suficiente, o painel **não chuta**: mostra a classe do alvo e a lista de
 inimigos daquela classe que já apareceram no kill feed.
 
-**Não use a tecla de rádio para identificar o alvo.** Mandar "Attack [alvo]!" toda hora dá
-bloqueio de chat por spam (e é contra as regras do jogo: "abuso de comandos de rádio"). O painel
-não precisa disso: o kill feed e o mapa bastam.
+### Atalho opcional: tecla de rádio
+
+O painel funciona sem isso, mas quando você quer o modelo do alvo **antes** de trocar tiros,
+dá para usar uma mensagem de rádio ligada a uma tecla (recurso normal do War Thunder):
+
+1. Abra **Controls** e procure por *radio message*.
+2. Em **Favorite radio message 1**, escolha **"Attack [alvo]!"** (ou "I'm attacking [alvo]!").
+3. Ligue **Quick radio message #1** a uma tecla fácil (um botão lateral do mouse, por exemplo).
+4. Na batalha: trave o alvo e aperte a tecla **uma vez**. O alvo pisca no mapa do time e o
+   painel mostra o avião exato (como **certo**).
+
+Use com moderação: repetir a mensagem em sequência dá bloqueio de chat por spam, e as regras do
+jogo falam em "abuso de comandos de rádio". Uma vez por alvo basta; para o resto, o kill feed e o
+mapa resolvem sozinhos.
 
 ### Radar
 
