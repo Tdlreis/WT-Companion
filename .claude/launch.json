@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "companion",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["companion.py", "--no-browser", "--port", "8192"],
+      "port": 8192,
+      "autoPort": false
+    }
+  ]
+}

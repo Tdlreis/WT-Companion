@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WT Companion</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">WT Companion</div>
+  <div id="status" class="pill">Conectando…</div>
+  <div id="mine" class="mine"></div>
+  <div id="dive" class="dive" hidden></div>
+</header>
+
+<main class="layout">
+  <section class="col-main">
+    <div id="alert" class="alert" hidden></div>
+    <div id="flash" class="flash" hidden></div>
+    <div id="manualBar" class="manual-bar" hidden></div>
+    <div id="targetStrip" class="strip" hidden></div>
+    <article class="card focus">
+      <div id="fHead" class="fhead"></div>
+      <div id="fHero" class="hero"></div>
+      <div id="fTactic"></div>
+      <div id="fTiles"></div>
+      <details id="fDetails" class="more" hidden>
+        <summary>Mais detalhes: dicas, ficha completa e armamento</summary>
+        <div id="fDetailsBody"></div>
+      </details>
+    </article>
+  </section>
+
+  <aside class="col-side">
+    <div class="card radar-card">
+      <div class="radar-head">
+        <h2>Radar</h2>
+        <div class="seg" id="rangeSel">
+          <button data-range="2000">2 km</button><button data-range="4000">4 km</button><button data-range="8000">8 km</button>
+        </div>
+      </div>
+      <div class="radar-wrap">
+        <canvas id="radarCanvas" role="img" aria-label="Radar com os aviões em volta de você"></canvas>
+        <div id="radarTip" class="rtip" hidden></div>
+      </div>
+      <div class="radar-legend">
+        <span><i class="sym en">▲</i>caça</span><span><i class="sym en">■</i>bombardeiro</span><span><i class="sym en">◆</i>ataque</span>
+        <span><i class="sym al">●</i>aliado</span>
+      </div>
+      <div id="radar"></div>
+    </div>
+
+    <div class="card">
+      <h2>Comparar com…</h2>
+      <input id="search" type="search" placeholder="Digite um avião (ex.: Bf 109, Spitfire, B-17)" autocomplete="off">
+      <ul id="results" class="results"></ul>
+    </div>
+
+    <div class="card">
+      <h2>Inimigos nesta partida <span id="enemyCount" class="muted"></span></h2>
+      <ul id="enemies" class="plist"></ul>
+      <details id="othersBox">
+        <summary id="othersTitle">Aliados e não identificados</summary>
+        <ul id="others" class="plist"></ul>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>Eventos</h2>
+      <ul id="log" class="log"></ul>
+    </div>
+
+    <div class="card settings">
+      <h2>Configuração</h2>
+      <label>Seu nick no jogo
+        <span class="row"><input id="nick" type="text" placeholder="ex.: Tdlreis"><button id="saveNick">Salvar</button></span>
+      </label>
+      <p id="dbInfo" class="hint"></p>
+    </div>
+  </aside>
+</main>
+<script src="app.js"></script>
+<script src="radar.js"></script>
+</body>
+</html>

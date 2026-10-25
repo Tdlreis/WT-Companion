@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Dados gerados / baixados (recriados por build_db.py e companion.py)
+data/cache/
+data/img/
+
+# Config pessoal (nick do jogador)
+data/config.json
+
+# Claude Code (configs locais)
+.claude/settings.local.json
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
